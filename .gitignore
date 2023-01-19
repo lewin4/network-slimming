@@ -1,2 +1,5 @@
 .idea
-
+logs/*.tar
+no-s-r/*.tar
+newhao/*.tar
+*.pth
