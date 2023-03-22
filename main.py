@@ -207,7 +207,7 @@ def main():
             if summary_writer is not None:
                 summary_writer.add_scalar("Train batch loss",
                                           loss.item(),
-                                          epoch)  # (epoch * len(train_loader)) + batch_idx
+                                          (epoch-args.start_epoch+1)*batch_idx)  # (epoch * len(train_loader)) + batch_idx
             train_loss += loss.item()
             # pred = output.data.max(1, keepdim=True)[1]
             loss.backward()
