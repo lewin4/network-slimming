@@ -288,10 +288,10 @@ def main():
     def save_checkpoint(state, is_best, refine, filepath):
         if refine:
             state["cfg"] = cfg
-        torch.save(state, os.path.join(filepath, '04-28-22h47m/checkpoint.pth.tar'))
+        torch.save(state, os.path.join(filepath, 'checkpoint.pth.tar'))
         if is_best:
             del state["optimizer"]
-            torch.save(state, os.path.join(filepath, '04-28-22h47m/model_best.pth.tar'))
+            torch.save(state, os.path.join(filepath, 'model_best.pth.tar'))
             # shutil.copyfile(os.path.join(filepath, 'checkpoint.pth.tar'), os.path.join(filepath, 'model_best.pth.tar'))
 
     # test_fps(args.start_epoch, args.epochs)
