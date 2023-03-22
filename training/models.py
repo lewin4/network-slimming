@@ -12,7 +12,7 @@ from typing import Optional
 import torch
 import torchvision
 from torchvision.models.resnet import model_urls
-from models import resnet18, resnet34
+from models import resnet18, resnet34, vgg
 
 
 def get_resnet18(pretrained: bool = False, **kwargs) -> torch.nn.Module:
@@ -93,6 +93,9 @@ def get_uncompressed_model(arch: str, pretrained: Optional[bool] = True, path=No
         model = get_mask_rcnn(pretrained, **kwargs)
     elif arch == "custom" and (path is not None):
         model = get_custom_model(path)
+    elif arch == "vgg19":
+        assert "dataset" in kwargs
+        model = vgg(dataset=kwargs["dataset"])
     else:
         raise ValueError(f"Unknown model arch: {arch}")
 

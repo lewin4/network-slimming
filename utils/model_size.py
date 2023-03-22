@@ -12,7 +12,7 @@ import math
 from typing import Optional
 
 import torch
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 
 from .state_dict_utils import _compress_state_dict
 

@@ -1,5 +1,6 @@
-.idea
-logs/*.tar
-no-s-r/*.tar
-newhao/*.tar
+.idea/
+logs/
+data.cifar10/
+no-s-r/
+newhao/
 *.pth
