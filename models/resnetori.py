@@ -163,7 +163,8 @@ class ResNet(nn.Module):
         width_per_group: int = 64,
         replace_stride_with_dilation: Optional[List[bool]] = None,
         norm_layer: Optional[Callable[..., nn.Module]] = None,
-        cfg: List = None
+        cfg: List = None,
+        **kwargs
     ) -> None:
         if cfg is None:
             if block == BasicBlock:

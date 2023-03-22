@@ -94,8 +94,8 @@ def get_uncompressed_model(arch: str, pretrained: Optional[bool] = True, path=No
     elif arch == "custom" and (path is not None):
         model = get_custom_model(path)
     elif arch == "vgg19":
-        assert "dataset" in kwargs
-        model = vgg(dataset=kwargs["dataset"])
+        assert "dataset" in kwargs.keys()
+        model = vgg(**kwargs)
     else:
         raise ValueError(f"Unknown model arch: {arch}")
 

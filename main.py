@@ -30,19 +30,19 @@ def main():
                         help='training dataset path')
     parser.add_argument('--image_shape', type=list, default=[32, 32],
                         help='the shape feed to network')
-    parser.add_argument('--sparsity-regularization', '-sr', dest='sr', action='store_true', default=False,
+    parser.add_argument('--sparsity-regularization', '-sr', dest='sr', action='store_true', default=True,
                         help='train with channel sparsity regularization')
     parser.add_argument('--s', type=float, default=0.0001,
                         help='scale sparse rate (default: 0.0001)')
     parser.add_argument('--refine',
-                        default='', type=str,
+                        default='logs/vgg16_cifar10_output/prune/0.4pruned.pth.tar', type=str,
                         metavar='PATH',
                         help='path to the pruned model to be fine tuned')
     parser.add_argument('--batch_size', type=int, default=256, metavar='N',
                         help='input batch size for training (default: 64)')
     parser.add_argument('--test_batch_size', type=int, default=256, metavar='N',
                         help='input batch size for testing (default: 256)')
-    parser.add_argument('--epochs', type=int, default=120, metavar='N',
+    parser.add_argument('--epochs', type=int, default=60, metavar='N',
                         help='number of epochs to train (default: 160)')
     parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                         help='manual epoch number (useful on restarts)')
@@ -54,15 +54,16 @@ def main():
                         metavar='W', help='weight decay (default: 1e-4)')
     parser.add_argument('--resume', default=r"", type=str, metavar='PATH',
                         help='path to latest checkpoint (default: none)')
-    parser.add_argument('--pretrain', default='', type=str, metavar='PATH',
+    parser.add_argument('--pretrain', default='', type=str,
+                        metavar='PATH',
                         help='path to pretrain model (default: none)')
     parser.add_argument('--no-cuda', action='store_true', default=False,
                         help='disables CUDA training')
-    parser.add_argument('--seed', type=int, default=1, metavar='S',
+    parser.add_argument('--seed', type=int, default=10086, metavar='S',
                         help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                         help='how many batches to wait before logging training status')
-    parser.add_argument('--save', default='./logs/vgg16_cifar10_output', type=str, metavar='PATH',
+    parser.add_argument('--save', default='./logs/vgg16_cifar10_output/refine', type=str, metavar='PATH',
                         help='path to save prune model (default: current directory)')
     parser.add_argument('--arch', default='vgg19', type=str,
                         help='architecture to use')
@@ -74,7 +75,7 @@ def main():
     localtime = time.strftime("%m-%d-%Hh%Mm", time.localtime())
 
     args = parser.parse_args()
-    summary_writer = SummaryWriter(args.save +"/{}/tensorboard/".format(localtime))
+    summary_writer = SummaryWriter(args.save + "/{}/tensorboard/".format(localtime))
 
     if summary_writer is not None:
         summary_writer.add_text("config", str(args))
@@ -87,7 +88,7 @@ def main():
     if not os.path.exists(args.save):
         os.makedirs(args.save)
 
-    kwargs = {'num_workers': 4, 'pin_memory': True}
+    kwargs = {'num_workers': 3, 'pin_memory': True}
     if args.dataset == 'cifar10':
         train_loader = torch.utils.data.DataLoader(
             datasets.CIFAR10('./data.cifar10', train=True, download=True,
@@ -135,9 +136,14 @@ def main():
         checkpoint = torch.load(args.refine)
         cfg = checkpoint.get('cfg', None)
         # model = models.__dict__[args.arch](dataset=args.dataset, depth=args.depth, cfg=checkpoint['cfg'])
-        model = get_uncompressed_model(args.arch, pretrained=False, num_classes=args.num_classes, cfg=cfg)
+        model = get_uncompressed_model(args.arch,
+                                       pretrained=False,
+                                       num_classes=args.num_classes,
+                                       dataset=args.dataset,
+                                       cfg=cfg)
         model.load_state_dict(checkpoint['state_dict'])
         print("=> refine from '{}'".format(args.refine))
+        del checkpoint
     else:
         # model = models.__dict__[args.arch](dataset=args.dataset, depth=args.depth)
         model = get_uncompressed_model(args.arch, pretrained=False, num_classes=args.num_classes, dataset=args.dataset)
@@ -181,22 +187,23 @@ def main():
             model.load_state_dict(checkpoint['state_dict'])
             print("=> loaded model '{}' ".format(args.pretrain))
         else:
-            print("=> no model found at '{}'".format(args.pretrain))
+            raise Exception("=> no model found at '{}'".format(args.pretrain))
 
     lr_scheduler = get_learning_rate_scheduler({"lr_scheduler": {"type": "cosine", "last_epoch": args.start_epoch}},
                                                optimizer, args.epochs, len(train_loader))
 
     # additional subgradient descent on the sparsity-induced penalty term
-    def updateBN():
+    def updateBN() -> None:
         for m in model.modules():
             if isinstance(m, nn.BatchNorm2d):
                 m.weight.grad.data.add_(args.s * torch.sign(m.weight.data))  # L1
 
-    def train(epoch):
+    def train(epoch: int):
         model.train()
         train_loss = 0
         pred_list = torch.Tensor()
         true_list = torch.Tensor()
+        batch_num = len(train_loader)
         for batch_idx, (data, target) in enumerate(tqdm(train_loader)):
             if args.cuda:
                 data, target = data.cuda(), target.cuda()
@@ -207,7 +214,7 @@ def main():
             if summary_writer is not None:
                 summary_writer.add_scalar("Train batch loss",
                                           loss.item(),
-                                          (epoch-args.start_epoch+1)*batch_idx)  # (epoch * len(train_loader)) + batch_idx
+                                          (epoch-args.start_epoch)*batch_num+(batch_idx))
             train_loss += loss.item()
             # pred = output.data.max(1, keepdim=True)[1]
             loss.backward()
@@ -226,12 +233,10 @@ def main():
 
         report = classification_report(true_list, pred_list, labels=range(args.num_classes), digits=4, output_dict=True)
         acc = report["accuracy"]
-        train_loss = train_loss/len(train_loader.dataset)
+        train_loss = train_loss / len(train_loader.dataset)
         if summary_writer is not None:
             summary_writer.add_scalar("Train epoch loss", train_loss, epoch)
             summary_writer.add_scalar("Train acc", acc, epoch)
-
-
 
     def test(epoch):
         model.eval()
@@ -256,8 +261,9 @@ def main():
         recall = report["macro avg"]["recall"]
         f1_score = report["macro avg"]['f1-score']
         test_loss /= len(test_loader.dataset)
-        print('\nTest set: Average loss: {:.4f},\nAccuracy: {:.4f},\nPrecision: {:.4f},\nRecall: {:.4f},\nf1-score: {:.4f}'.format(
-            test_loss, acc, precision, recall, f1_score))
+        print(
+            '\nTest set: Average loss: {:.4f},\nAccuracy: {:.4f},\nPrecision: {:.4f},\nRecall: {:.4f},\nf1-score: {:.4f}'.format(
+                test_loss, acc, precision, recall, f1_score))
         if summary_writer is not None:
             summary_writer.add_scalar("test loss", test_loss, epoch)
             summary_writer.add_scalar("test acc", acc, epoch)
@@ -283,7 +289,8 @@ def main():
             total_times += times
             print("{} epoch finish. time: {}. Pure inference time: {}".format(epoch, time.time() - epoch_time, times))
         num = len(test_loader.dataset) * (epochs - start_epoch)
-        print("\nAll time: {}, \nImage num: {}, \nTime per image: {}".format(total_times, num, total_times/float(num)))
+        print(
+            "\nAll time: {}, \nImage num: {}, \nTime per image: {}".format(total_times, num, total_times / float(num)))
 
     def save_checkpoint(state, is_best, refine, filepath):
         if refine:
@@ -306,7 +313,7 @@ def main():
         # if epoch in [args.epochs * 0.5, args.epochs * 0.75]:
         #     for param_group in optimizer.param_groups:
         #         param_group['lr'] *= 0.1
-        print("Training start epoch: {}".format(epoch))
+        print("Training start epoch: {}/{}".format(epoch, args.epochs))
         train(epoch)
         prec1, report = test(epoch)
         if lr_scheduler.step_epoch():
@@ -329,6 +336,7 @@ def main():
     print("Best precision:" + str(best_precision))
     print("Best recall:" + str(best_recall))
     print("Best f1-score:" + str(best_f1_score))
+
 
 if __name__ == "__main__":
     main()
