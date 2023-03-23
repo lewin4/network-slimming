@@ -5,3 +5,4 @@ from .preresnet import *
 from .densenet import *
 from .channel_selection import *
 from .resnetori import *
+from .googlenet import GoogLeNet

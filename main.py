@@ -22,8 +22,9 @@ from tqdm import tqdm
 def main():
     # Training settings
     parser = argparse.ArgumentParser(description='PyTorch Slimming CIFAR training')
-    parser.add_argument('--dataset', type=str, default='cifar10', choices=["cifar10", "cifar100", "sewage"],
-                        help='training dataset (default: cifar100)')
+    parser.add_argument('--dataset', type=str, default='cifar10',
+                        choices=["cifar10", "cifar100", "sewage", "miniimagenet"],
+                        help='training dataset (default: cifar10)')
     parser.add_argument('--num_classes', type=int, default=10,
                         help='training dataset (default: cifar100)')
     parser.add_argument('--image_dir', type=str, default=r'E:\LY\data\classification_aug',
@@ -35,14 +36,14 @@ def main():
     parser.add_argument('--s', type=float, default=0.0001,
                         help='scale sparse rate (default: 0.0001)')
     parser.add_argument('--refine',
-                        default='logs/vgg16_cifar10_output/prune/0.4pruned.pth.tar', type=str,
+                        default='', type=str,
                         metavar='PATH',
                         help='path to the pruned model to be fine tuned')
     parser.add_argument('--batch_size', type=int, default=256, metavar='N',
                         help='input batch size for training (default: 64)')
     parser.add_argument('--test_batch_size', type=int, default=256, metavar='N',
                         help='input batch size for testing (default: 256)')
-    parser.add_argument('--epochs', type=int, default=60, metavar='N',
+    parser.add_argument('--epochs', type=int, default=120, metavar='N',
                         help='number of epochs to train (default: 160)')
     parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                         help='manual epoch number (useful on restarts)')
@@ -63,9 +64,9 @@ def main():
                         help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                         help='how many batches to wait before logging training status')
-    parser.add_argument('--save', default='./logs/vgg16_cifar10_output/refine', type=str, metavar='PATH',
+    parser.add_argument('--save', default='./logs/googlenet_cifar10_output', type=str, metavar='PATH',
                         help='path to save prune model (default: current directory)')
-    parser.add_argument('--arch', default='vgg19', type=str,
+    parser.add_argument('--arch', default='googlenet', type=str,
                         help='architecture to use')
     parser.add_argument('--depth', default=101, type=int,
                         help='depth of the neural network')
@@ -88,7 +89,7 @@ def main():
     if not os.path.exists(args.save):
         os.makedirs(args.save)
 
-    kwargs = {'num_workers': 3, 'pin_memory': True}
+    kwargs = {'num_workers': 2, 'pin_memory': True}
     if args.dataset == 'cifar10':
         train_loader = torch.utils.data.DataLoader(
             datasets.CIFAR10('./data.cifar10', train=True, download=True,
@@ -127,8 +128,36 @@ def main():
         train_loader, test_loader, _ = get_loaders(image_dir=args.image_dir,
                                                    batch_size=args.batch_size,
                                                    img_shape=args.image_shape,
-                                                   radio=[0.2, 0.7, 0.1],
+                                                   radio=[0.7, 0.2, 0.1],
                                                    **kwargs)
+    elif args.dataset == "miniimagenet":
+        from MLclf import MLclf
+        # Download the original mini-imagenet data:
+        # only need to run this line before you download the mini-imagenet dataset for the first time.
+        MLclf.miniimagenet_download(Download=True)
+        # Transform the original data into the format that fits the task for classification:
+        transform = transforms.Compose(
+            [transforms.RandomHorizontalFlip(),
+             transforms.ToTensor(),
+             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+
+        train_dataset, validation_dataset, test_dataset = MLclf.miniimagenet_clf_dataset(
+            ratio_train=0.6, ratio_val=0.2,
+            seed_value=None, shuffle=True,
+            transform=transform,
+            save_clf_data=True)
+
+        # The dataset can be transformed to dataloader via torch:
+        train_loader = torch.utils.data.DataLoader(
+            dataset=train_dataset,
+            batch_size=args.batch_size,
+            shuffle=True,
+            **kwargs)
+        test_loader = torch.utils.data.DataLoader(
+            dataset=validation_dataset,
+            batch_size=args.test_batch_size,
+            shuffle=True,
+            **kwargs)
     else:
         raise ValueError("No valid dataset is given.")
 
@@ -146,7 +175,11 @@ def main():
         del checkpoint
     else:
         # model = models.__dict__[args.arch](dataset=args.dataset, depth=args.depth)
-        model = get_uncompressed_model(args.arch, pretrained=False, num_classes=args.num_classes, dataset=args.dataset)
+        model = get_uncompressed_model(
+            args.arch,
+            pretrained=False,
+            num_classes=args.num_classes,
+            aux_logits=True)
 
     print(model)
 
@@ -210,7 +243,13 @@ def main():
             data, target = Variable(data), Variable(target.long())
             optimizer.zero_grad()
             output = model(data)
-            loss = F.cross_entropy(output, target)
+            if args.arch == "googlenet":
+                loss0 = F.cross_entropy(output[0], target)
+                loss1 = F.cross_entropy(output[1], target)
+                loss2 = F.cross_entropy(output[2], target)
+                loss = 0.6*loss0 + 0.2*loss1 + 0.2*loss2
+            else:
+                loss = F.cross_entropy(output, target)
             if summary_writer is not None:
                 summary_writer.add_scalar("Train batch loss",
                                           loss.item(),
@@ -218,7 +257,10 @@ def main():
             train_loss += loss.item()
             # pred = output.data.max(1, keepdim=True)[1]
             loss.backward()
-            pred = output.data.max(1, keepdim=True)[1]  # get the index of the max log-probability
+            if args.arch == "googlenet":
+                pred = output[0].data.max(1, keepdim=True)[1]
+            else:
+                pred = output.data.max(1, keepdim=True)[1]  # get the index of the max log-probability
             pred_list = torch.cat((pred_list, pred.squeeze().cpu()), 0)
             true_list = torch.cat((true_list, target.cpu()), 0)
             if args.sr:
