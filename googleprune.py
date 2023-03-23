@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 import torch
 import torch.nn as nn
 import numpy as np
+from typing import Union, Tuple
 
 # Prune settings
 parser = argparse.ArgumentParser(description='PyTorch Slimming CIFAR prune')
@@ -20,7 +21,7 @@ parser.add_argument('--depth', type=int, default=19,
                     help='depth of the vgg')
 parser.add_argument('--percent', type=float, default=0.2,
                     help='scale sparse rate (default: 0.5)')
-parser.add_argument('--model', default='logs/googlenet_cifar10_output/0.8557/model_best.pth.tar', type=str, metavar='PATH',
+parser.add_argument('--model', default='logs/googlenet_cifar10_output/model_best.pth.tar', type=str, metavar='PATH',
                     help='path to the model (default: none)')
 parser.add_argument('--save', default='./logs/googlenet_cifar10_output/prune', type=str, metavar='PATH',
                     help='path to save pruned model (default: none)')
@@ -36,15 +37,15 @@ def test(test_model):
     kwargs = {'num_workers': 1, 'pin_memory': True} if args.cuda else {}
     if args.dataset == 'cifar10':
         dataset = datasets.CIFAR10('./data.cifar10', train=False, transform=transforms.Compose([
-                    transforms.ToTensor(),
-                    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
         test_loader = DataLoader(
             dataset,
             batch_size=args.test_batch_size, shuffle=True, **kwargs)
     elif args.dataset == 'cifar100':
         dataset = datasets.CIFAR100('./data.cifar100', train=False, transform=transforms.Compose([
-                    transforms.ToTensor(),
-                    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))]))
         test_loader = DataLoader(
             dataset,
             batch_size=args.test_batch_size, shuffle=True, **kwargs)
@@ -63,6 +64,18 @@ def test(test_model):
     print('\nTest set: Accuracy: {}/{} ({:.1f}%)\n'.format(
         correct, len(dataset), 100. * correct / len(dataset)))
     return correct / float(len(dataset))
+
+
+def get_inception_branch_name(layer_name: str) -> Tuple[Union[str, None], Union[str, None]]:
+    name_list = layer_name.split(".")
+    inception = None
+    branch = None
+    for word in name_list:
+        if "inception" in word:
+            inception = word
+        if "branch" in word:
+            branch = word
+    return inception, branch
 
 
 if __name__ == "__main__":
@@ -90,8 +103,9 @@ if __name__ == "__main__":
         else:
             raise Exception("=> no checkpoint found at '{}'".format(args.model))
 
-    print(model)
-
+    # print(model)
+    # 剪枝前的准确率
+    print("剪枝前的准确率:")
     acc = test(model)
 
     # 总通道数
@@ -134,7 +148,8 @@ if __name__ == "__main__":
     pruned_ratio = pruned / total
 
     print('Pre-processing Successful!')
-
+    # 预处理后的准确率
+    print("预处理后的准确率:")
     acc = test(model)
 
     # Make real prune
@@ -143,61 +158,101 @@ if __name__ == "__main__":
     if args.cuda:
         newmodel.cuda()
 
+    # 剪枝后空模型的准确率
+    print("剪枝后空模型的准确率:")
+    acc = test(newmodel)
+
     num_parameters = sum([param.nelement() for param in newmodel.parameters()])
-    savepath = os.path.join(args.save, str(args.percent)+"prune.txt")
+    savepath = os.path.join(args.save, str(args.percent) + "prune.txt")
     with open(savepath, "w") as fp:
         fp.write("Configuration: \n" + str(cfg) + "\n")
         fp.write("Number of parameters: \n" + str(num_parameters) + "\n")
         fp.write("Test accuracy: \n" + str(acc) + "\n")
         fp.write("cfg: \n" + str(cfg))
 
+    # 转移参数
     layer_id_in_cfg = 0
     start_mask = torch.ones(3)
     end_mask = cfg_mask[layer_id_in_cfg]
-    inception_name = {}
+    inception_name_start_mask = {}
+    branch_list = []
+    inception_in_channel = torch.Tensor(0)
     for [m0, m1] in zip(model.named_modules(), newmodel.named_modules()):
         m0name = m0[0]
         m0 = m0[1]
         m1name = m1[0]
         m1 = m1[1]
         if isinstance(m0, nn.BatchNorm2d):
-            idx1 = np.squeeze(np.argwhere(np.asarray(end_mask.cpu().numpy())))
-            if idx1.size == 1:
-                idx1 = np.resize(idx1, (1,))
-            m1.weight.data = m0.weight.data[idx1.tolist()].clone()
-            m1.bias.data = m0.bias.data[idx1.tolist()].clone()
-            m1.running_mean = m0.running_mean[idx1.tolist()].clone()
-            m1.running_var = m0.running_var[idx1.tolist()].clone()
-            layer_id_in_cfg += 1
-            start_mask = end_mask.clone()
-            if layer_id_in_cfg < len(cfg_mask):  # do not change in Final FC
-                end_mask = cfg_mask[layer_id_in_cfg]
+            if "aux" not in m0name:
+                idx1 = np.squeeze(np.argwhere(np.asarray(end_mask.cpu().numpy())))
+                if idx1.size == 1:
+                    idx1 = np.resize(idx1, (1,))
+                m1.weight.data = m0.weight.data[idx1.tolist()].clone()
+                m1.bias.data = m0.bias.data[idx1.tolist()].clone()
+                m1.running_mean = m0.running_mean[idx1.tolist()].clone()
+                m1.running_var = m0.running_var[idx1.tolist()].clone()
+                layer_id_in_cfg += 1
+                start_mask = end_mask.clone()
+                if layer_id_in_cfg < len(cfg_mask):  # do not change in Final FC
+                    end_mask = cfg_mask[layer_id_in_cfg]
+
         elif isinstance(m0, nn.Conv2d):
-            # 新进入一个inception
-            if "inception" in m0name and m0name not in inception_name:
-                inception_name[m0name:start_mask]
+            inception_name, branch_name = get_inception_branch_name(m0name)
 
+            if "aux1" in m0name:
+                idx0 = np.squeeze(np.argwhere(np.asarray(inception_name_start_mask["inception4b"].cpu().numpy())))
+                if idx0.size == 1:
+                    idx0 = np.resize(idx0, (1,))
+                w1 = m0.weight.data[:, idx0.tolist(), :, :].clone()
+                m1.weight.data = w1.clone()
+            elif "aux2" in m0name:
+                idx0 = np.squeeze(np.argwhere(np.asarray(inception_name_start_mask["inception4e"].cpu().numpy())))
+                if idx0.size == 1:
+                    idx0 = np.resize(idx0, (1,))
+                w1 = m0.weight.data[:, idx0.tolist(), :, :].clone()
+                m1.weight.data = w1.clone()
+            else:
+                # 新进入一个branch
+                if branch_name is not None and branch_name not in branch_list:
+                    # 新进入一个inception
+                    if inception_name is not None and inception_name not in inception_name_start_mask:
+                        if inception_name == "inception3a":
+                            inception_name_start_mask[inception_name] = start_mask.clone()
+                        else:
+                            inception_name_start_mask[inception_name] = inception_in_channel.clone()
+                            inception_in_channel = torch.Tensor(0)
+                    else:
+                        inception_in_channel = torch.cat((inception_in_channel, start_mask.cpu()), 0)
+                    branch_list.append(branch_name)
+                    start_mask = inception_name_start_mask[inception_name]
 
-            idx0 = np.squeeze(np.argwhere(np.asarray(start_mask.cpu().numpy())))
-            idx1 = np.squeeze(np.argwhere(np.asarray(end_mask.cpu().numpy())))
-            print('In shape: {:d}, Out shape {:d}.'.format(idx0.size, idx1.size))
-            if idx0.size == 1:
-                idx0 = np.resize(idx0, (1,))
-            if idx1.size == 1:
-                idx1 = np.resize(idx1, (1,))
-            w1 = m0.weight.data[:, idx0.tolist(), :, :].clone()
-            w1 = w1[idx1.tolist(), :, :, :].clone()
-            m1.weight.data = w1.clone()
+                if branch_name == "branch4":
+                    inception_in_channel = torch.cat((inception_in_channel, end_mask.cpu()), 0)
+                    branch_list.clear()  # 清空分支列表
+
+                idx0 = np.squeeze(np.argwhere(np.asarray(start_mask.cpu().numpy())))
+                idx1 = np.squeeze(np.argwhere(np.asarray(end_mask.cpu().numpy())))
+                print('In shape: {:d}, Out shape {:d}.'.format(idx0.size, idx1.size))
+                if idx0.size == 1:
+                    idx0 = np.resize(idx0, (1,))
+                if idx1.size == 1:
+                    idx1 = np.resize(idx1, (1,))
+                w1 = m0.weight.data[:, idx0.tolist(), :, :].clone()
+                w1 = w1[idx1.tolist(), :, :, :].clone()
+                m1.weight.data = w1.clone()
         elif isinstance(m0, nn.Linear):
-            idx0 = np.squeeze(np.argwhere(np.asarray(start_mask.cpu().numpy())))
-            if idx0.size == 1:
-                idx0 = np.resize(idx0, (1,))
-            m1.weight.data = m0.weight.data[:, idx0].clone()
-            m1.bias.data = m0.bias.data.clone()
+            if "aux" not in m0name:
+                idx0 = np.squeeze(np.argwhere(np.asarray(inception_in_channel.cpu().numpy())))
+                if idx0.size == 1:
+                    idx0 = np.resize(idx0, (1,))
+                m1.weight.data = m0.weight.data[:, idx0].clone()
+                m1.bias.data = m0.bias.data.clone()
 
     torch.save({'cfg': cfg, 'state_dict': newmodel.state_dict()},
-               os.path.join(args.save, str(args.percent)+'pruned.pth.tar'))
+               os.path.join(args.save, str(args.percent) + 'pruned.pth.tar'))
 
     print(newmodel)
-    model = newmodel
-    test(model)
+
+    # 剪枝后的准确率
+    print("剪枝后的准确率:")
+    test(newmodel)
