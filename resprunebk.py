@@ -72,7 +72,6 @@ def main():
     thre_index = int(total * args.percent)
     thre = y[thre_index]
 
-
     pruned = 0
     cfg = []
     cfg_mask = []

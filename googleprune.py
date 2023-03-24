@@ -19,9 +19,9 @@ parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='disables CUDA training')
 parser.add_argument('--depth', type=int, default=19,
                     help='depth of the vgg')
-parser.add_argument('--percent', type=float, default=0.2,
+parser.add_argument('--percent', type=float, default=0.8,
                     help='scale sparse rate (default: 0.5)')
-parser.add_argument('--model', default='logs/googlenet_cifar10_output/model_best.pth.tar', type=str, metavar='PATH',
+parser.add_argument('--model', default='logs/googlenet_cifar10_output/0.8557/model_best.pth.tar', type=str, metavar='PATH',
                     help='path to the model (default: none)')
 parser.add_argument('--save', default='./logs/googlenet_cifar10_output/prune', type=str, metavar='PATH',
                     help='path to save pruned model (default: none)')
@@ -33,7 +33,7 @@ if not os.path.exists(args.save):
 
 
 # simple test model after Pre-processing prune (simple set BN scales to zeros)
-def test(test_model):
+def test(test_model: nn.Module) -> float:
     kwargs = {'num_workers': 1, 'pin_memory': True} if args.cuda else {}
     if args.dataset == 'cifar10':
         dataset = datasets.CIFAR10('./data.cifar10', train=False, transform=transforms.Compose([
@@ -52,7 +52,7 @@ def test(test_model):
     else:
         raise ValueError("No valid dataset is given.")
     test_model.eval()
-    correct = 0
+    correct = torch.Tensor([0., ])
     for data, target in test_loader:
         if args.cuda:
             data, target = data.cuda(), target.cuda()
@@ -60,10 +60,10 @@ def test(test_model):
         output = test_model(data)
         pred = output.data.max(1, keepdim=True)[1]  # get the index of the max log-probability
         correct += pred.eq(target.data.view_as(pred)).cpu().sum()
-
     print('\nTest set: Accuracy: {}/{} ({:.1f}%)\n'.format(
-        correct, len(dataset), 100. * correct / len(dataset)))
-    return correct / float(len(dataset))
+        correct, len(dataset), (100. * correct / len(dataset)).item()))
+
+    return (correct / len(dataset)).item()
 
 
 def get_inception_branch_name(layer_name: str) -> Tuple[Union[str, None], Union[str, None]]:
@@ -106,7 +106,7 @@ if __name__ == "__main__":
     # print(model)
     # 剪枝前的准确率
     print("剪枝前的准确率:")
-    acc = test(model)
+    bf_acc = test(model)
 
     # 总通道数
     total = 0
@@ -136,7 +136,12 @@ if __name__ == "__main__":
             if "aux" in name:
                 continue
             weight_copy = m.weight.data.abs().clone()
-            mask = weight_copy.gt(thre).float().cuda()
+            mask = weight_copy.gt(thre).float()
+            if torch.sum(mask) == 0:
+                bn_max = weight_copy.max()
+                mask = weight_copy.ge(bn_max).float()
+            if args.cuda:
+                mask.cuda()
             pruned = pruned + mask.shape[0] - torch.sum(mask)
             m.weight.data.mul_(mask)
             m.bias.data.mul_(mask)
@@ -160,15 +165,9 @@ if __name__ == "__main__":
 
     # 剪枝后空模型的准确率
     print("剪枝后空模型的准确率:")
-    acc = test(newmodel)
+    test(newmodel)
 
     num_parameters = sum([param.nelement() for param in newmodel.parameters()])
-    savepath = os.path.join(args.save, str(args.percent) + "prune.txt")
-    with open(savepath, "w") as fp:
-        fp.write("Configuration: \n" + str(cfg) + "\n")
-        fp.write("Number of parameters: \n" + str(num_parameters) + "\n")
-        fp.write("Test accuracy: \n" + str(acc) + "\n")
-        fp.write("cfg: \n" + str(cfg))
 
     # 转移参数
     layer_id_in_cfg = 0
@@ -255,4 +254,12 @@ if __name__ == "__main__":
 
     # 剪枝后的准确率
     print("剪枝后的准确率:")
-    test(newmodel)
+    prune_acc = test(newmodel)
+
+    savepath = os.path.join(args.save, str(args.percent) + "prune.txt")
+    with open(savepath, "w") as fp:
+        fp.write("Configuration: \n" + str(cfg) + "\n")
+        fp.write("Number of parameters: \n" + str(num_parameters) + "\n")
+        fp.write("Test accuracy before: " + str(bf_acc) + "\n")
+        fp.write("Test accuracy preprocess: " + str(acc) + "\n")
+        fp.write("Test accuracy prune: " + str(prune_acc) + "\n")

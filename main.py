@@ -31,19 +31,19 @@ def main():
                         help='training dataset path')
     parser.add_argument('--image_shape', type=list, default=[32, 32],
                         help='the shape feed to network')
-    parser.add_argument('--sparsity-regularization', '-sr', dest='sr', action='store_true', default=True,
+    parser.add_argument('--sparsity-regularization', '-sr', dest='sr', action='store_true', default=False,
                         help='train with channel sparsity regularization')
     parser.add_argument('--s', type=float, default=0.0001,
                         help='scale sparse rate (default: 0.0001)')
     parser.add_argument('--refine',
-                        default='', type=str,
+                        default='logs/vgg16_cifar10_output/refine/0.2_0.9015/model_best.pth.tar', type=str,
                         metavar='PATH',
                         help='path to the pruned model to be fine tuned')
     parser.add_argument('--batch_size', type=int, default=256, metavar='N',
                         help='input batch size for training (default: 64)')
     parser.add_argument('--test_batch_size', type=int, default=256, metavar='N',
                         help='input batch size for testing (default: 256)')
-    parser.add_argument('--epochs', type=int, default=120, metavar='N',
+    parser.add_argument('--epochs', type=int, default=20, metavar='N',
                         help='number of epochs to train (default: 160)')
     parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                         help='manual epoch number (useful on restarts)')
@@ -64,9 +64,9 @@ def main():
                         help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                         help='how many batches to wait before logging training status')
-    parser.add_argument('--save', default='./logs/googlenet_cifar10_output', type=str, metavar='PATH',
+    parser.add_argument('--save', default='./logs/googlenet_cifar10_output/refine', type=str, metavar='PATH',
                         help='path to save prune model (default: current directory)')
-    parser.add_argument('--arch', default='googlenet', type=str,
+    parser.add_argument('--arch', default='vgg19', type=str,
                         help='architecture to use')
     parser.add_argument('--depth', default=101, type=int,
                         help='depth of the neural network')
@@ -169,6 +169,7 @@ def main():
                                        pretrained=False,
                                        num_classes=args.num_classes,
                                        dataset=args.dataset,
+                                       aux_logits=True,
                                        cfg=cfg)
         model.load_state_dict(checkpoint['state_dict'])
         print("=> refine from '{}'".format(args.refine))
@@ -345,39 +346,41 @@ def main():
 
     # test_fps(args.start_epoch, args.epochs)
 
-    # test(0)
+    acc, report = test(0)
+    print(acc)
+    print(report)
 
-    best_prec1 = 0.
-    best_precision = 0.
-    best_recall = 0.
-    best_f1_score = 0.
-    for epoch in range(args.start_epoch, args.epochs):
-        # if epoch in [args.epochs * 0.5, args.epochs * 0.75]:
-        #     for param_group in optimizer.param_groups:
-        #         param_group['lr'] *= 0.1
-        print("Training start epoch: {}/{}".format(epoch, args.epochs))
-        train(epoch)
-        prec1, report = test(epoch)
-        if lr_scheduler.step_epoch():
-            # last_acc is between 0 and 100. We need between 0 and 1
-            lr_scheduler.step(prec1)
-        is_best = prec1 > best_prec1
-        best_prec1 = max(prec1, best_prec1)
-        if is_best:
-            best_precision = report["macro avg"]["precision"]
-            best_recall = report["macro avg"]["recall"]
-            best_f1_score = report["macro avg"]['f1-score']
-        save_checkpoint({
-            'epoch': epoch + 1,
-            'state_dict': model.state_dict(),
-            'best_prec1': best_prec1,
-            'optimizer': optimizer.state_dict(),
-        }, is_best, args.refine, filepath=args.save)
-
-    print("Best accuracy: " + str(best_prec1))
-    print("Best precision:" + str(best_precision))
-    print("Best recall:" + str(best_recall))
-    print("Best f1-score:" + str(best_f1_score))
+    # best_prec1 = 0.
+    # best_precision = 0.
+    # best_recall = 0.
+    # best_f1_score = 0.
+    # for epoch in range(args.start_epoch, args.epochs):
+    #     # if epoch in [args.epochs * 0.5, args.epochs * 0.75]:
+    #     #     for param_group in optimizer.param_groups:
+    #     #         param_group['lr'] *= 0.1
+    #     print("Training start epoch: {}/{}".format(epoch, args.epochs))
+    #     train(epoch)
+    #     prec1, report = test(epoch)
+    #     if lr_scheduler.step_epoch():
+    #         # last_acc is between 0 and 100. We need between 0 and 1
+    #         lr_scheduler.step(prec1)
+    #     is_best = prec1 > best_prec1
+    #     best_prec1 = max(prec1, best_prec1)
+    #     if is_best:
+    #         best_precision = report["macro avg"]["precision"]
+    #         best_recall = report["macro avg"]["recall"]
+    #         best_f1_score = report["macro avg"]['f1-score']
+    #     save_checkpoint({
+    #         'epoch': epoch + 1,
+    #         'state_dict': model.state_dict(),
+    #         'best_prec1': best_prec1,
+    #         'optimizer': optimizer.state_dict(),
+    #     }, is_best, args.refine, filepath=args.save)
+    #
+    # print("Best accuracy: " + str(best_prec1))
+    # print("Best precision:" + str(best_precision))
+    # print("Best recall:" + str(best_recall))
+    # print("Best f1-score:" + str(best_f1_score))
 
 
 if __name__ == "__main__":
