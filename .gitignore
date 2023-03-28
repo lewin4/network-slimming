@@ -4,3 +4,4 @@ data.cifar10/
 no-s-r/
 newhao/
 *.pth
+data_miniimagenet/
