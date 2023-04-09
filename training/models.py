@@ -12,7 +12,7 @@ from typing import Optional
 import torch
 import torchvision
 from torchvision.models.resnet import model_urls
-from models import resnet18, resnet34, vgg, GoogLeNet
+from models import resnet18, resnet34, vgg, googlenet
 
 
 def get_resnet18(pretrained: bool = False, **kwargs) -> torch.nn.Module:
@@ -102,7 +102,7 @@ def get_uncompressed_model(
         model = vgg(**kwargs)
     elif arch == "googlenet":
         assert "num_classes" in kwargs.keys() and "aux_logits" in kwargs.keys()
-        model = GoogLeNet(**kwargs)
+        model = googlenet(pretrained, **kwargs)
     else:
         raise ValueError(f"Unknown model arch: {arch}")
 
