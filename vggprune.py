@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 
 # Prune settings
 parser = argparse.ArgumentParser(description='PyTorch Slimming CIFAR prune')
-parser.add_argument('--dataset', type=str, default='cifar10',
+parser.add_argument('--dataset', type=str, default='cifar100',
                     help='training dataset (default: cifar10)')
 parser.add_argument('--test-batch-size', type=int, default=256, metavar='N',
                     help='input batch size for testing (default: 256)')
@@ -15,11 +15,11 @@ parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='disables CUDA training')
 parser.add_argument('--depth', type=int, default=19,
                     help='depth of the vgg')
-parser.add_argument('--percent', type=float, default=0.2,
+parser.add_argument('--percent', type=float, default=0.8,
                     help='scale sparse rate (default: 0.5)')
-parser.add_argument('--model', default='logs/vgg16_cifar10_output/稀疏化训练/model_best.pth.tar', type=str, metavar='PATH',
+parser.add_argument('--model', default=r'E:\LY\network-slimming\logs\vgg_cifar100_output\0.727_论文超参数\model_best.pth.tar', type=str, metavar='PATH',
                     help='path to the model (default: none)')
-parser.add_argument('--save', default='./logs/vgg16_cifar10_output/prune', type=str, metavar='PATH',
+parser.add_argument('--save', default='./logs/vgg_cifar100_output/prune', type=str, metavar='PATH',
                     help='path to save pruned model (default: none)')
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -108,6 +108,9 @@ if __name__ == "__main__":
         if isinstance(m, nn.BatchNorm2d):
             weight_copy = m.weight.data.abs().clone()
             mask = weight_copy.gt(thre).float().cuda()
+            if torch.sum(mask) == 0:
+                bn_max = weight_copy.max()
+                mask = weight_copy.ge(bn_max).float()
             pruned = pruned + mask.shape[0] - torch.sum(mask)
             m.weight.data.mul_(mask)
             m.bias.data.mul_(mask)

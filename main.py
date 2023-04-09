@@ -22,7 +22,7 @@ from tqdm import tqdm
 def main():
     # Training settings
     parser = argparse.ArgumentParser(description='PyTorch Slimming CIFAR training')
-    parser.add_argument('--dataset', type=str, default='miniimagenet',
+    parser.add_argument('--dataset', type=str, default='cifar100',
                         choices=["cifar10", "cifar100", "sewage", "miniimagenet"],
                         help='training dataset (default: cifar10)')
     parser.add_argument('--num_classes', type=int, default=100,
@@ -31,23 +31,23 @@ def main():
                         help='training dataset path')
     parser.add_argument('--image_shape', type=list, default=[32, 32],
                         help='the shape feed to network')
-    parser.add_argument('--sparsity-regularization', '-sr', dest='sr', action='store_true', default=True,
+    parser.add_argument('--sparsity-regularization', '-sr', dest='sr', action='store_true', default=False,
                         help='train with channel sparsity regularization')
     parser.add_argument('--s', type=float, default=0.0001,
                         help='scale sparse rate (default: 0.0001)')
     parser.add_argument('--refine',
-                        default='', type=str,
+                        default=r'E:\LY\network-slimming\logs\vgg_cifar100_output\prune\0.6pruned.pth.tar', type=str,
                         metavar='PATH',
                         help='path to the pruned model to be fine tuned')
-    parser.add_argument('--batch_size', type=int, default=128, metavar='N',
+    parser.add_argument('--batch_size', type=int, default=64, metavar='N',
                         help='input batch size for training (default: 64)')
-    parser.add_argument('--test_batch_size', type=int, default=128, metavar='N',
+    parser.add_argument('--test_batch_size', type=int, default=64, metavar='N',
                         help='input batch size for testing (default: 256)')
-    parser.add_argument('--epochs', type=int, default=150, metavar='N',
+    parser.add_argument('--epochs', type=int, default=160, metavar='N',
                         help='number of epochs to train (default: 160)')
     parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                         help='manual epoch number (useful on restarts)')
-    parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
+    parser.add_argument('--lr', type=float, default=0.1, metavar='LR',
                         help='learning rate (default: 0.1)')
     parser.add_argument('--momentum', type=float, default=0.9, metavar='M',
                         help='SGD momentum (default: 0.9)')
@@ -64,9 +64,9 @@ def main():
                         help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                         help='how many batches to wait before logging training status')
-    parser.add_argument('--save', default='./logs/googlenet_miniimagenet_output', type=str, metavar='PATH',
+    parser.add_argument('--save', default='./logs/vgg_cifar100_output/refine', type=str, metavar='PATH',
                         help='path to save prune model (default: current directory)')
-    parser.add_argument('--arch', default='googlenet', type=str,
+    parser.add_argument('--arch', default='vgg', type=str,
                         help='architecture to use')
     parser.add_argument('--depth', default=101, type=int,
                         help='depth of the neural network')
@@ -134,17 +134,35 @@ def main():
         from MLclf import MLclf
         # Download the original mini-imagenet data:
         # only need to run this line before you download the mini-imagenet dataset for the first time.
-        MLclf.miniimagenet_download(Download=False)
+        # MLclf.miniimagenet_download(Download=False)
         # Transform the original data into the format that fits the task for classification:
-        transform = transforms.Compose(
-            [transforms.ToTensor(),
-             transforms.RandomHorizontalFlip(),
-             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+        train_transform = transforms.Compose([
+                                  transforms.Pad(4),
+                                  transforms.RandomCrop(32),
+                                  transforms.RandomHorizontalFlip(),
+                                  transforms.ToTensor(),
+                                  transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+                              ])
+        # train_transform = transforms.Compose(
+        #     [transforms.RandomHorizontalFlip(),
+        #      transforms.Resize((32, 32)),
+        #      transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+
+        val_transform = transforms.Compose([
+                                  # transforms.Pad(4),
+                                  # transforms.RandomCrop(32),
+                                  # transforms.RandomHorizontalFlip(),
+                                  # transforms.ToTensor(),
+                                  transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+                              ])
+        # val_transform = transforms.Compose(
+        #     [transforms.Resize((32, 32)),
+        #      transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
         train_dataset, validation_dataset, test_dataset = MLclf.miniimagenet_clf_dataset(
             ratio_train=0.6, ratio_val=0.2,
             seed_value=None, shuffle=True,
-            transform=transform,
+            transform=None,
             save_clf_data=True)
 
         # The dataset can be transformed to dataloader via torch:
@@ -179,6 +197,7 @@ def main():
         model = get_uncompressed_model(
             args.arch,
             pretrained=False,
+            dataset=args.dataset,
             num_classes=args.num_classes,
             aux_logits=True)
 
@@ -195,8 +214,8 @@ def main():
     else:
         model.cuda()
 
-    # optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+    # optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     for param_group in optimizer.param_groups:
         param_group["initial_lr"] = args.lr
 
@@ -223,7 +242,8 @@ def main():
         else:
             raise Exception("=> no model found at '{}'".format(args.pretrain))
 
-    lr_scheduler = get_learning_rate_scheduler({"lr_scheduler": {"type": "cosine", "last_epoch": args.start_epoch}},
+    lr_scheduler = get_learning_rate_scheduler({"lr_scheduler": {"type": "multistep", "last_epoch": args.start_epoch,
+                                                                 "milestones": [80, 120], "factor": 0.1}},
                                                optimizer, args.epochs, len(train_loader))
 
     # additional subgradient descent on the sparsity-induced penalty term
@@ -240,6 +260,7 @@ def main():
         batch_num = len(train_loader)
         for batch_idx, (data, target) in enumerate(tqdm(train_loader)):
             if args.cuda:
+                # data, target = train_transform(data.cuda()), target.cuda()
                 data, target = data.cuda(), target.cuda()
             data, target = Variable(data), Variable(target.long())
             optimizer.zero_grad()
@@ -289,6 +310,7 @@ def main():
         true_list = torch.Tensor()
         for data, target in test_loader:
             if args.cuda:
+                # data, target = train_transform(data.cuda()), target.long().cuda()
                 data, target = data.cuda(), target.long().cuda()
             with torch.no_grad():
                 output = model(data)
@@ -313,10 +335,17 @@ def main():
         return acc, report
 
     def test_fps(start_epoch, epochs):
-        total_times = 0
         model.eval()
+        from thop import profile, clever_format
+        input = torch.randn(1, 3, 32, 32).cuda()
+        macs, params = profile(model, inputs=(input,))
+        macs, params = clever_format([macs, params], "%.3f")
+        print(macs)
+        print("="*40)
+        print(params)
+        total_times = 0
         print("{} epochs will be test.".format(epochs - start_epoch))
-
+        model.cpu()
         for epoch in range(start_epoch, epochs):
             print("{} epoch start......".format(epoch))
             times = 0

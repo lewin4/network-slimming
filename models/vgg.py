@@ -30,7 +30,7 @@ class vgg(nn.Module):
 
         if dataset == 'cifar10':
             num_classes = 10
-        elif dataset == 'cifar100':
+        elif dataset == 'cifar100' or dataset == 'miniimagenet':
             num_classes = 100
         else:
             raise Exception

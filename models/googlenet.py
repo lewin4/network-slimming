@@ -194,6 +194,7 @@ class GoogLeNet(nn.Module):
         if self.aux1 is not None:
             if self.training:
                 aux1 = self.aux1(x)
+                aux1 = torch.softmax(aux1, dim=0)
 
         x = self.inception4b(x)
         # N x 512 x 14 x 14
@@ -205,6 +206,7 @@ class GoogLeNet(nn.Module):
         if self.aux2 is not None:
             if self.training:
                 aux2 = self.aux2(x)
+                aux2 = torch.softmax(aux2, dim=0)
 
         x = self.inception4e(x)
         # N x 832 x 14 x 14
@@ -222,6 +224,7 @@ class GoogLeNet(nn.Module):
         x = self.dropout(x)
         x = self.fc(x)
         # N x 1000 (num_classes)
+        x = torch.softmax(x, dim=0)
         return x, aux2, aux1
 
     @torch.jit.unused

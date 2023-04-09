@@ -97,7 +97,7 @@ def get_uncompressed_model(
         model = get_mask_rcnn(pretrained, **kwargs)
     elif arch == "custom" and (path is not None):
         model = get_custom_model(path)
-    elif arch == "vgg19":
+    elif arch == "vgg":
         assert "dataset" in kwargs.keys()
         model = vgg(**kwargs)
     elif arch == "googlenet":
