@@ -1,6 +1,8 @@
 .idea/
 logs/
 data.cifar10/
+data.cifar100/
+PM/
 no-s-r/
 newhao/
 *.pth

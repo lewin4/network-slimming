@@ -53,11 +53,7 @@ def googlenet(pretrained: bool = False, progress: bool = True, **kwargs: Any) ->
         model = GoogLeNet(**kwargs)
         state_dict = load_state_dict_from_url(model_urls['googlenet'],
                                               progress=progress)
-        for key in list(state_dict.keys()):
-            if "fc" in key:
-                del state_dict[key]
-
-        model.load_state_dict(state_dict, strict=False)
+        model.load_state_dict(state_dict)
         if not original_aux_logits:
             model.aux_logits = False
             model.aux1 = None  # type: ignore[assignment]
@@ -146,7 +142,7 @@ class GoogLeNet(nn.Module):
             self.aux2 = None  # type: ignore[assignment]
 
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.dropout = nn.Dropout(0.9)
+        self.dropout = nn.Dropout(0.1)
         self.fc = nn.Linear(sum(cfg[51: 57])-cfg[52]-cfg[54], num_classes)
 
         if init_weights:
@@ -326,7 +322,7 @@ class InceptionAux(nn.Module):
         # N x 2048
         x = F.relu(self.fc1(x), inplace=True)
         # N x 1024
-        x = F.dropout(x, 0.95, training=self.training)
+        x = F.dropout(x, 0.2, training=self.training)
         # N x 1024
         x = self.fc2(x)
         # N x 1000 (num_classes)
