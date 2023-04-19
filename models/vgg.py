@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 from typing import List, Union, Any
+import torch.nn.functional as F
 
 
 __all__ = ['vgg']
@@ -27,7 +28,7 @@ class vgg(nn.Module):
         if cfg is None:
             cfg = defaultcfg[depth]
 
-        self.feature = self.make_layers(cfg, True)
+        self.features = self.make_layers(cfg, True)
 
         num_classes = num_classes
         if dataset == 'cifar10':
@@ -55,9 +56,10 @@ class vgg(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        x = self.feature(x)
-        x = nn.AvgPool2d(2)(x)
+        x = self.features(x)
+        x = nn.AdaptiveAvgPool2d((1, 1))(x)
         x = x.view(x.size(0), -1)
+        x = F.dropout(x, 0.85, training=self.training)
         y = self.classifier(x)
         return y
 

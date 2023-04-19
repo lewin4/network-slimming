@@ -13,6 +13,7 @@ import torch
 import torchvision
 from torchvision.models.resnet import model_urls
 from models import resnet18, resnet34, vgg, googlenet
+from torch.hub import load_state_dict_from_url
 
 
 def get_resnet18(pretrained: bool = False, **kwargs) -> torch.nn.Module:
@@ -100,6 +101,10 @@ def get_uncompressed_model(
     elif arch == "vgg":
         assert "dataset" in kwargs.keys()
         model = vgg(**kwargs)
+        if pretrained:
+            state_dict = load_state_dict_from_url('https://download.pytorch.org/models/vgg19_bn-c79401a0.pth',
+                                                  progress=True)
+            model.load_state_dict(state_dict, strict=False)
     elif arch == "googlenet":
         assert "num_classes" in kwargs.keys() and "aux_logits" in kwargs.keys()
         model = googlenet(pretrained, **kwargs)
