@@ -21,6 +21,7 @@ class vgg(nn.Module):
                  depth: int = 19,
                  init_weights: bool = True,
                  cfg: List[Union[int, str]] = None,
+                 num_classes: int = 100,
                  **kwargs: Any):
         super(vgg, self).__init__()
         if cfg is None:
@@ -28,12 +29,12 @@ class vgg(nn.Module):
 
         self.feature = self.make_layers(cfg, True)
 
+        num_classes = num_classes
         if dataset == 'cifar10':
             num_classes = 10
         elif dataset == 'cifar100' or dataset == 'miniimagenet':
             num_classes = 100
-        else:
-            raise Exception
+
         self.classifier = nn.Linear(cfg[-1], num_classes)
         if init_weights:
             self._initialize_weights()

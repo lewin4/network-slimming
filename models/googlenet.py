@@ -142,7 +142,7 @@ class GoogLeNet(nn.Module):
             self.aux2 = None  # type: ignore[assignment]
 
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.dropout = nn.Dropout(0.2)
+        self.dropout = nn.Dropout(0.1)
         self.fc = nn.Linear(sum(cfg[51: 57])-cfg[52]-cfg[54], num_classes)
 
         if init_weights:
@@ -322,7 +322,7 @@ class InceptionAux(nn.Module):
         # N x 2048
         x = F.relu(self.fc1(x), inplace=True)
         # N x 1024
-        x = F.dropout(x, 0.7, training=self.training)
+        x = F.dropout(x, 0.2, training=self.training)
         # N x 1024
         x = self.fc2(x)
         # N x 1000 (num_classes)

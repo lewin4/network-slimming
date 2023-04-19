@@ -4,13 +4,14 @@ import argparse
 import shutil
 import numpy as np
 import torch
+from torch.utils.data import DataLoader
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.autograd import Variable
 import models
-from dataset.sewage_loader import get_loaders
+from dataset import get_loaders, PM_dataset
 from torch.utils.tensorboard import SummaryWriter
 from training import get_learning_rate_scheduler, get_uncompressed_model
 import time
@@ -22,26 +23,26 @@ from tqdm import tqdm
 def main():
     # Training settings
     parser = argparse.ArgumentParser(description='PyTorch Slimming CIFAR training')
-    parser.add_argument('--dataset', type=str, default='cifar100',
+    parser.add_argument('--dataset', type=str, default='PM',
                         choices=["cifar10", "cifar100", "sewage", "miniimagenet"],
                         help='training dataset (default: cifar10)')
-    parser.add_argument('--num_classes', type=int, default=100,
+    parser.add_argument('--num_classes', type=int, default=2,
                         help='training dataset (default: cifar100)')
     parser.add_argument('--image_dir', type=str, default=r'E:\LY\data\classification_aug',
                         help='training dataset path')
     parser.add_argument('--image_shape', type=list, default=[32, 32],
                         help='the shape feed to network')
-    parser.add_argument('--sparsity-regularization', '-sr', dest='sr', action='store_true', default=False,
+    parser.add_argument('--sparsity-regularization', '-sr', dest='sr', action='store_true', default=True,
                         help='train with channel sparsity regularization')
     parser.add_argument('--s', type=float, default=0.0001,
                         help='scale sparse rate (default: 0.0001)')
     parser.add_argument('--refine',
-                        default=r'E:\LY\network-slimming\logs\vgg_cifar100_output\prune\0.6pruned.pth.tar', type=str,
+                        default=r'', type=str,
                         metavar='PATH',
                         help='path to the pruned model to be fine tuned')
     parser.add_argument('--batch_size', type=int, default=64, metavar='N',
-                        help='input batch size for training (default: 64)')
-    parser.add_argument('--test_batch_size', type=int, default=64, metavar='N',
+                        help='input batch size for training (default: 256)')
+    parser.add_argument('--test_batch_size', type=int, default=128, metavar='N',
                         help='input batch size for testing (default: 256)')
     parser.add_argument('--epochs', type=int, default=160, metavar='N',
                         help='number of epochs to train (default: 160)')
@@ -64,7 +65,7 @@ def main():
                         help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                         help='how many batches to wait before logging training status')
-    parser.add_argument('--save', default='./logs/vgg_cifar100_output/refine', type=str, metavar='PATH',
+    parser.add_argument('--save', default='./logs/vgg_PM_output/', type=str, metavar='PATH',
                         help='path to save prune model (default: current directory)')
     parser.add_argument('--arch', default='vgg', type=str,
                         help='architecture to use')
@@ -176,6 +177,43 @@ def main():
             batch_size=args.test_batch_size,
             shuffle=True,
             **kwargs)
+    elif args.dataset == "PM":
+        train_dataset = PM_dataset(
+            "PM/PALM-Training400",
+            "PM/PALM-Validation400",
+            train=True,
+            transform=transforms.Compose([
+                transforms.Resize((224, 224)),
+                # transforms.RandomCrop(32),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+            ]),
+        )
+        train_loader = DataLoader(
+            dataset=train_dataset,
+            batch_size=args.batch_size,
+            shuffle=True,
+            **kwargs,
+        )
+        test_dataset = PM_dataset(
+            "PM/PALM-Training400",
+            "PM/PALM-Validation400",
+            train=False,
+            transform=transforms.Compose([
+                transforms.Resize(1024),
+                # transforms.RandomCrop(32),
+                # transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+            ]),
+        )
+        test_loader = DataLoader(
+            dataset=test_dataset,
+            batch_size=args.test_batch_size,
+            shuffle=True,
+            **kwargs,
+        )
     else:
         raise ValueError("No valid dataset is given.")
 
