@@ -1,12 +1,13 @@
 import os
 import argparse
+from torch.utils.data import DataLoader
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
 from torchvision import datasets, transforms
 from models import *
-from dataset.sewage_loader import get_loaders
+from dataset import get_loaders, PM_dataset
 from training import get_uncompressed_model
 
 def main():
@@ -27,9 +28,9 @@ def main():
                         help='depth of the resnet')
     parser.add_argument('--percent', type=float, default=0.8,
                         help='scale sparse rate (default: 0.5)')
-    parser.add_argument('--model', default=r'logs_cifar-10-resnet18/04-24-10h02m/model_best.pth.tar', type=str, metavar='PATH',
+    parser.add_argument('--model', default=r'E:\LY\network-slimming\logs\resnet34_cifar10_output\04-23-17h40m_0.8684\model_best.pth.tar', type=str, metavar='PATH',
                         help='path to the model (default: none)')
-    parser.add_argument('--save', default='cifar', type=str, metavar='PATH',
+    parser.add_argument('--save', default='logs/resnet34_cifar10_output/prune', type=str, metavar='PATH',
                         help='path to save pruned model (default: none)')
 
     args = parser.parse_args()
@@ -39,7 +40,7 @@ def main():
         os.makedirs(args.save)
 
     # model = resnet(depth=args.depth, dataset=args.dataset)
-    model = get_uncompressed_model("resnet18", pretrained=False, num_classes=args.num_classes)
+    model = get_uncompressed_model("resnet34", pretrained=False, num_classes=args.num_classes)
 
     if args.cuda:
         model.cuda()
@@ -53,7 +54,8 @@ def main():
             print("=> loaded checkpoint '{}' (epoch {}) Prec1: {:f}"
                   .format(args.model, checkpoint['epoch'], best_prec1))
         else:
-            print("=> no checkpoint found at '{}'".format(args.model))
+            raise Exception("=> no checkpoint found at '{}'".format(args.model))
+            # print("=> no checkpoint found at '{}'".format(args.model))
 
     def test(model):
         kwargs = {'num_workers': 4, 'pin_memory': True}
@@ -74,6 +76,23 @@ def main():
                                             batch_size=args.test_batch_size,
                                             img_shape=args.image_shape,
                                             **kwargs)
+        elif args.dataset == "PM":
+            test_dataset = PM_dataset(
+                "PM/PALM-Training400",
+                "PM/PALM-Validation400",
+                train=False,
+                transform=transforms.Compose([
+                    transforms.Resize((1024, 1024)),
+                    transforms.ToTensor(),
+                    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+                ]),
+            )
+            test_loader = DataLoader(
+                dataset=test_dataset,
+                batch_size=args.test_batch_size,
+                shuffle=True,
+                **kwargs,
+            )
         else:
             raise ValueError("No valid dataset is given.")
         model.eval()
@@ -91,6 +110,7 @@ def main():
             correct, len(test_loader.dataset), 100. * correct / len(test_loader.dataset)))
         return correct / float(len(test_loader.dataset))
 
+    acc = test(model)
 
     total = 0
 
@@ -119,6 +139,9 @@ def main():
         if isinstance(m, nn.BatchNorm2d) and (isinstance(model_modules[layer_id+1], channel_selection) or isinstance(model_modules[layer_id+1], nn.Conv2d)):
             weight_copy = m.weight.data.abs().clone()
             mask = weight_copy.gt(thre).float().cuda()
+            if torch.sum(mask) == 0:
+                bn_max = weight_copy.max()
+                mask = weight_copy.ge(bn_max).float()
             m.weight.data.mul_(mask)
             m.bias.data.mul_(mask)
             cfg.append(int(torch.sum(mask)))
@@ -139,7 +162,7 @@ def main():
     print("Cfg:")
     print(cfg)
 
-    newmodel = get_uncompressed_model("resnet18", pretrained=False, num_classes=args.num_classes, cfg=cfg)
+    newmodel = get_uncompressed_model("resnet34", pretrained=False, num_classes=args.num_classes, cfg=cfg)
     if args.cuda:
         newmodel.cuda()
 
@@ -230,7 +253,7 @@ def main():
         os.path.join(args.save, '{}pruned.pth.tar'.format(args.percent))
     )
 
-    print(newmodel)
+    # print(newmodel)
     model = newmodel
     pruned_acc = test(model)
     with open(savepath, "w") as fp:

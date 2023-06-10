@@ -11,7 +11,7 @@ import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.autograd import Variable
 import models
-from dataset import get_loaders, PM_dataset
+from dataset import get_loaders, PM_dataset, Chinene_Medicine
 from torch.utils.tensorboard import SummaryWriter
 from training import get_learning_rate_scheduler, get_uncompressed_model
 import time
@@ -23,10 +23,10 @@ from tqdm import tqdm
 def main():
     # Training settings
     parser = argparse.ArgumentParser(description='PyTorch Slimming CIFAR training')
-    parser.add_argument('--dataset', type=str, default='PM',
+    parser.add_argument('--dataset', type=str, default='chinese_medicine',
                         choices=["cifar10", "cifar100", "sewage", "miniimagenet"],
                         help='training dataset (default: cifar10)')
-    parser.add_argument('--num_classes', type=int, default=2,
+    parser.add_argument('--num_classes', type=int, default=5,
                         help='training dataset (default: cifar100)')
     parser.add_argument('--image_dir', type=str, default=r'E:\LY\data\classification_aug',
                         help='training dataset path')
@@ -40,9 +40,9 @@ def main():
                         default=r'', type=str,
                         metavar='PATH',
                         help='path to the pruned model to be fine tuned')
-    parser.add_argument('--batch_size', type=int, default=64, metavar='N',
+    parser.add_argument('--batch_size', type=int, default=16, metavar='N',
                         help='input batch size for training (default: 256)')
-    parser.add_argument('--test_batch_size', type=int, default=128, metavar='N',
+    parser.add_argument('--test_batch_size', type=int, default=64, metavar='N',
                         help='input batch size for testing (default: 256)')
     parser.add_argument('--epochs', type=int, default=160, metavar='N',
                         help='number of epochs to train (default: 160)')
@@ -65,7 +65,7 @@ def main():
                         help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                         help='how many batches to wait before logging training status')
-    parser.add_argument('--save', default='./logs/vgg_PM_output/', type=str, metavar='PATH',
+    parser.add_argument('--save', default='./logs/vgg_chinene_medicine_output', type=str, metavar='PATH',
                         help='path to save prune model (default: current directory)')
     parser.add_argument('--arch', default='vgg', type=str,
                         help='architecture to use')
@@ -183,9 +183,14 @@ def main():
             "PM/PALM-Validation400",
             train=True,
             transform=transforms.Compose([
-                transforms.Resize((224, 224)),
-                # transforms.RandomCrop(32),
+                # transforms.Resize((1024, 1024)),
                 transforms.RandomHorizontalFlip(),
+                transforms.RandomVerticalFlip(),
+                transforms.RandomResizedCrop(size=(224, 224), scale=(0.2, 1.0), ratio=(1.0, 1.0)),
+                # transforms.RandomCrop(32),
+                transforms.RandomGrayscale(),
+                transforms.RandomRotation(degrees=30),
+                # transforms.RandomAutocontrast(),
                 transforms.ToTensor(),
                 transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
             ]),
@@ -201,7 +206,45 @@ def main():
             "PM/PALM-Validation400",
             train=False,
             transform=transforms.Compose([
-                transforms.Resize(1024),
+                transforms.Resize((224, 224)),
+                # transforms.RandomCrop(32),
+                # transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+            ]),
+        )
+        test_loader = DataLoader(
+            dataset=test_dataset,
+            batch_size=args.test_batch_size,
+            shuffle=True,
+            **kwargs,
+        )
+    elif args.dataset == "chinese_medicine":
+        train_dataset = Chinene_Medicine(
+            r"E:\LY\data\ChineseMedicine\train",
+            transform=transforms.Compose([
+                transforms.Resize((64, 64)),
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomVerticalFlip(),
+                # transforms.RandomResizedCrop(size=(224, 224), scale=(0.2, 1.0), ratio=(1.0, 1.0)),
+                transforms.RandomCrop((40, 40)),
+                # transforms.RandomGrayscale(),
+                # transforms.RandomRotation(degrees=30),
+                # transforms.RandomAutocontrast(),
+                transforms.ToTensor(),
+                transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+            ]),
+        )
+        train_loader = DataLoader(
+            dataset=train_dataset,
+            batch_size=args.batch_size,
+            shuffle=True,
+            **kwargs,
+        )
+        test_dataset = Chinene_Medicine(
+            r"E:\LY\data\ChineseMedicine\val",
+            transform=transforms.Compose([
+                transforms.Resize((224, 224)),
                 # transforms.RandomCrop(32),
                 # transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
@@ -300,7 +343,7 @@ def main():
             if args.cuda:
                 # data, target = train_transform(data.cuda()), target.cuda()
                 data, target = data.cuda(), target.cuda()
-            data, target = Variable(data), Variable(target.long())
+            data, target = Variable(data), Variable(target.long().squeeze())
             optimizer.zero_grad()
             output = model(data)
             if args.arch == "googlenet":
@@ -349,7 +392,7 @@ def main():
         for data, target in test_loader:
             if args.cuda:
                 # data, target = train_transform(data.cuda()), target.long().cuda()
-                data, target = data.cuda(), target.long().cuda()
+                data, target = data.cuda(), target.long().squeeze().cuda()
             with torch.no_grad():
                 output = model(data)
                 test_loss += F.cross_entropy(output, target, size_average=False).item()  # sum up batch loss
@@ -383,14 +426,14 @@ def main():
         print(params)
         total_times = 0
         print("{} epochs will be test.".format(epochs - start_epoch))
-        model.cpu()
+        # model.cpu()
         for epoch in range(start_epoch, epochs):
             print("{} epoch start......".format(epoch))
             times = 0
             epoch_time = time.time()
             for data, target in test_loader:
-                # if args.cuda:
-                #     data, target = data.cuda(), target.cuda()
+                if args.cuda:
+                    data, target = data.cuda(), target.cuda()
                 start_time = time.time()
                 with torch.no_grad():
                     output = model(data)
@@ -413,9 +456,9 @@ def main():
 
     # test_fps(args.start_epoch, args.epochs)
 
-    # acc, report = test(0)
-    # print(acc)
-    # print(report)
+    acc, report = test(0)
+    print(acc)
+    print(report)
 
     best_prec1 = 0.
     best_precision = 0.
